@@ -6,59 +6,44 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "./libs/IterableArrayWithoutDuplicateKeys.sol";
 
 contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
-    using IterableArrayWithoutDuplicateKeys for IterableArrayWithoutDuplicateKeys.Map;
-
     using SafeERC20 for IERC20;
 
-    // Accrued token per share
-    uint256 public accTokenPerShare;
+    struct Pool {
+        uint256 accTokenPerShare;
+        uint256 rewardPerSecond;
+        uint256 globalRewardDebt;
+        uint256 timestampLast;
+        uint256 timestampEnd;
+        uint256 totalStakedFinal;
+        uint256 totalRewardsPaid;
+        uint256 totalRewardsAdded;
+        IERC20 rewardToken;
+        mapping(address => uint256) userRewardDebt;
+        mapping(address => uint256) totalRewardsReceived;
+    }
 
-    // The timestamp of the last pool update
-    uint256 public timestampLast;
+    mapping(uint256 => Pool) pools;
 
-    // The timestamp when REWARD mining ends.
-    uint256 public timestampEnd;
+    uint256 public currentPoolId;
 
-    // REWARD tokens created per second.
-    uint256 public rewardPerSecond;
-
-    //Total wad staked;
     uint256 public totalStaked;
 
-    uint256 public globalRewardDebt;
-
-    // The precision factor
     uint256 public PRECISION_FACTOR;
 
     uint256 public period = 7 days;
 
-    //rewards tracking
-    uint256 public totalRewardsPaid;
-    mapping(address => uint256) public totalRewardsReceived;
-
-    // The reward token, changeable
-    IERC20 public rewardToken;
-
-    // The staked token
     IERC20 public stakedToken;
 
-    // staked bal
     mapping(address => uint256) public stakedBal;
 
-    // Info of each user that stakes tokens (stakedToken)
-    mapping(address => uint256) public userRewardDebt;
-    event NewRewardPerSecond(uint256 rewardPerSecpmd);
+    //Pool ids up to this number which have had final claim
+    mapping(address => uint256) public accountFinalClaimedTo;
 
-    //do not receive rewards
     mapping(address => bool) isRewardExempt;
 
     bool isInitialized;
-
-    //wants autoclaim
-    IterableArrayWithoutDuplicateKeys.Map autoclaimAccounts;
 
     function initialize(IERC20 _stakedToken, address _czusdPair)
         external
@@ -70,19 +55,85 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         isRewardExempt[_czusdPair] = true;
         isRewardExempt[msg.sender] = true;
 
-        PRECISION_FACTOR = uint256(
-            10 **
-                (uint256(30) -
-                    (IERC20Metadata(address(rewardToken)).decimals()))
-        );
+        PRECISION_FACTOR = uint256(10**12);
+    }
 
-        // Set the timestampLast as now
-        timestampLast = block.timestamp;
+    function getPool(uint256 _index)
+        external
+        view
+        returns (
+            uint256 accTokenPerShare_,
+            uint256 rewardPerSecond_,
+            uint256 globalRewardDebt_,
+            uint256 timestampLast_,
+            uint256 timestampEnd_,
+            uint256 totalStakedFinal_,
+            uint256 totalRewardsPaid_,
+            uint256 totalRewardsAdded_,
+            IERC20 rewardToken_
+        )
+    {
+        accTokenPerShare_ = pools[_index].accTokenPerShare;
+        rewardPerSecond_ = pools[_index].rewardPerSecond;
+        globalRewardDebt_ = pools[_index].globalRewardDebt;
+        timestampLast_ = pools[_index].timestampLast;
+        timestampEnd_ = pools[_index].timestampEnd;
+        totalStakedFinal_ = pools[_index].totalStakedFinal;
+        totalRewardsPaid_ = pools[_index].totalRewardsPaid;
+        totalRewardsAdded_ = pools[_index].totalRewardsAdded;
+        rewardToken_ = pools[_index].rewardToken;
+    }
+
+    function getPoolAccount(uint256 _index, address _account)
+        external
+        view
+        returns (uint256 userRewardDebt_, uint256 totalRewardsReceived_)
+    {
+        userRewardDebt_ = pools[_index].userRewardDebt[_account];
+        totalRewardsReceived_ = pools[_index].totalRewardsReceived[_account];
     }
 
     function deposit(address _account, uint256 _amount) external {
         require(msg.sender == address(stakedToken), "ARP: Must be stakedtoken");
         _deposit(_account, _amount);
+    }
+
+    function airdrop(uint256 _wad) external {
+        Pool storage pool = pools[currentPoolId];
+        IERC20 rewardToken = pool.rewardToken;
+        _updatePool(currentPoolId);
+        rewardToken.transferFrom(msg.sender, address(this), _wad);
+        pool.accTokenPerShare =
+            pool.accTokenPerShare +
+            ((_wad * PRECISION_FACTOR) / totalStaked);
+    }
+
+    function addRewardTokens(uint256 _wad) external {
+        _updatePool(currentPoolId);
+
+        Pool storage pool = pools[currentPoolId];
+        IERC20 rewardToken = pool.rewardToken;
+        rewardToken.transferFrom(msg.sender, address(this), _wad);
+
+        pool.totalRewardsAdded += _wad;
+
+        uint256 totalRewardsToDistribute = pool.totalRewardsAdded -
+            ((pool.accTokenPerShare * pool.totalStakedFinal) /
+                PRECISION_FACTOR);
+
+        if (totalRewardsToDistribute > 0) {
+            pool.rewardPerSecond = totalRewardsToDistribute / period;
+            pool.timestampEnd = block.timestamp + period;
+        }
+    }
+
+    function updateRewardToken(IERC20 _newToken) external {
+        require(msg.sender == address(stakedToken), "ARP: Must be stakedtoken");
+        currentPoolId++;
+        Pool storage pool = pools[currentPoolId];
+        pool.timestampLast = block.timestamp;
+        pool.rewardToken = _newToken;
+        pool.totalStakedFinal = totalStaked;
     }
 
     function withdraw(address _account, uint256 _amount) external {
@@ -91,53 +142,68 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     }
 
     function claim() external {
-        _claimFor(msg.sender, false);
+        _claimAll(msg.sender);
     }
 
-    function _claimFor(address _account, bool _withFee)
-        internal
-        returns (uint256 _feewad)
-    {
+    function _claimAll(address _account) internal {
+        if (stakedBal[_account] == 0) return; //nothing to claim
+
+        for (
+            uint256 i = accountFinalClaimedTo[_account] + 1;
+            i <= currentPoolId;
+            i++
+        ) {
+            _claimFor(i, _account);
+        }
+    }
+
+    function _claimFor(uint256 _id, address _account) internal {
+        require(
+            accountFinalClaimedTo[_account] < _id,
+            "ARP: Already claimed closed pool"
+        );
+        if (_id != currentPoolId) accountFinalClaimedTo[_account] = _id;
+        Pool storage pool = pools[currentPoolId];
+        IERC20 rewardToken = pool.rewardToken;
         uint256 accountBal = stakedBal[_account];
-        _updatePool();
+        _updatePool(_id);
         if (accountBal > 0) {
-            uint256 pending = ((accountBal) * accTokenPerShare) /
+            uint256 pending = ((accountBal) * pool.accTokenPerShare) /
                 PRECISION_FACTOR -
-                userRewardDebt[_account];
+                pool.userRewardDebt[_account];
             if (pending > 0) {
                 rewardToken.safeTransfer(_account, pending);
-                totalRewardsPaid += pending;
-                totalRewardsReceived[_account] += pending;
+                pool.totalRewardsPaid += pending;
+                pool.totalRewardsReceived[_account] += pending;
             }
-            globalRewardDebt -= userRewardDebt[_account];
-            userRewardDebt[_account] =
-                (accountBal * accTokenPerShare) /
+            pool.globalRewardDebt -= pool.userRewardDebt[_account];
+            pool.userRewardDebt[_account] =
+                (accountBal * pool.accTokenPerShare) /
                 PRECISION_FACTOR;
-            globalRewardDebt += userRewardDebt[_account];
+            pool.globalRewardDebt += pool.userRewardDebt[_account];
         }
     }
 
     function _deposit(address _account, uint256 _amount) internal {
         if (isRewardExempt[_account]) return;
         if (_amount == 0) return;
-        _updatePool();
-        if (stakedBal[_account] > 0) {
-            uint256 pending = (stakedBal[_account] * accTokenPerShare) /
-                PRECISION_FACTOR -
-                userRewardDebt[_account];
-            if (pending > 0) {
-                rewardToken.safeTransfer(_account, pending);
-                totalRewardsPaid += pending;
-                totalRewardsReceived[_account] += pending;
-            }
-        }
-        globalRewardDebt -= userRewardDebt[_account];
+
+        _claimAll(_account);
+
+        //If the account has nothing staked, then do not need to claim old pools
+        if (stakedBal[_account] == 0)
+            accountFinalClaimedTo[_account] == currentPoolId - 1;
+
+        Pool storage pool = pools[currentPoolId];
+
+        pool.globalRewardDebt -= pool.userRewardDebt[_account];
         stakedBal[_account] += _amount;
-        userRewardDebt[_account] =
-            (stakedBal[_account] * accTokenPerShare) /
+        pool.userRewardDebt[_account] =
+            (stakedBal[_account] * pool.accTokenPerShare) /
             PRECISION_FACTOR;
-        globalRewardDebt += userRewardDebt[_account];
+        pool.globalRewardDebt += pool.userRewardDebt[_account];
         totalStaked += _amount;
+        pool.totalStakedFinal = totalStaked;
     }
 
     /*
@@ -147,23 +213,19 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     function _withdraw(address _account, uint256 _amount) internal {
         if (isRewardExempt[_account]) return;
         if (_amount == 0) return;
-        _updatePool();
 
-        uint256 pending = (stakedBal[_account] * accTokenPerShare) /
-            PRECISION_FACTOR -
-            userRewardDebt[_account];
-        if (pending > 0) {
-            rewardToken.safeTransfer(_account, pending);
-            totalRewardsPaid += pending;
-            totalRewardsReceived[_account] += pending;
-        }
-        globalRewardDebt -= userRewardDebt[_account];
+        _claimAll(_account);
+
+        Pool storage pool = pools[currentPoolId];
+
+        pool.globalRewardDebt -= pool.userRewardDebt[_account];
         stakedBal[_account] -= _amount;
-        userRewardDebt[_account] =
-            (stakedBal[_account] * accTokenPerShare) /
+        pool.userRewardDebt[_account] =
+            (stakedBal[_account] * pool.accTokenPerShare) /
             PRECISION_FACTOR;
-        globalRewardDebt += userRewardDebt[_account];
+        pool.globalRewardDebt += pool.userRewardDebt[_account];
         totalStaked -= _amount;
+        pool.totalStakedFinal = totalStaked;
     }
 
     function setIsRewardExempt(address _for, bool _to) public onlyOwner {
@@ -194,53 +256,61 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
      * @param _user: user address
      * @return Pending reward for a given user
      */
-    function pendingReward(address _user) external view returns (uint256) {
-        if (block.timestamp > timestampLast && totalStaked != 0) {
-            uint256 adjustedTokenPerShare = accTokenPerShare +
-                ((rewardPerSecond *
-                    _getMultiplier(timestampLast, block.timestamp) *
-                    PRECISION_FACTOR) / totalStaked);
+    function pendingReward(uint256 _id, address _user)
+        external
+        view
+        returns (uint256)
+    {
+        Pool storage pool = pools[currentPoolId];
+
+        if (
+            block.timestamp > pool.timestampLast && pool.totalStakedFinal != 0
+        ) {
+            uint256 adjustedTokenPerShare = pool.accTokenPerShare +
+                ((pool.rewardPerSecond *
+                    _getMultiplier(_id, pool.timestampLast, block.timestamp) *
+                    PRECISION_FACTOR) / pool.totalStakedFinal);
+            //TODO: Fix stakedbal for calculating pending rewards
             return
                 (stakedBal[_user] * adjustedTokenPerShare) /
                 PRECISION_FACTOR -
-                userRewardDebt[_user];
+                pool.userRewardDebt[_user];
         } else {
             return
-                (stakedBal[_user] * accTokenPerShare) /
+                //TODO: Fix stakedbal for calculating pending rewards
+                (stakedBal[_user] * pool.accTokenPerShare) /
                 PRECISION_FACTOR -
-                userRewardDebt[_user];
+                pool.userRewardDebt[_user];
         }
     }
 
     /*
      * @notice Update reward variables of the given pool to be up-to-date.
      */
-    function _updatePool() internal {
-        if (block.timestamp <= timestampLast) {
+    function _updatePool(uint256 _id) internal {
+        //TODO: Switch to deposit method for adding rewards to pool id
+        Pool storage pool = pools[_id];
+
+        if (block.timestamp <= pool.timestampLast) {
             return;
         }
 
         if (totalStaked == 0) {
-            timestampLast = block.timestamp;
+            pool.timestampLast = block.timestamp;
             return;
         }
 
-        accTokenPerShare =
-            accTokenPerShare +
-            ((rewardPerSecond *
-                _getMultiplier(timestampLast, block.timestamp) *
-                PRECISION_FACTOR) / totalStaked);
-
-        uint256 totalRewardsToDistribute = rewardToken.balanceOf(
-            address(this)
-        ) +
-            globalRewardDebt -
-            ((accTokenPerShare * totalStaked) / PRECISION_FACTOR);
-        if (totalRewardsToDistribute > 0) {
-            rewardPerSecond = totalRewardsToDistribute / period;
-            timestampEnd = block.timestamp + period;
+        if (_id == currentPoolId) {
+            pool.totalStakedFinal = totalStaked;
         }
-        timestampLast = block.timestamp;
+
+        pool.accTokenPerShare =
+            pool.accTokenPerShare +
+            ((pool.rewardPerSecond *
+                _getMultiplier(_id, pool.timestampLast, block.timestamp) *
+                PRECISION_FACTOR) / pool.totalStakedFinal);
+
+        pool.timestampLast = block.timestamp;
     }
 
     /*
@@ -248,31 +318,18 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
      * @param _from: timestamp to start
      * @param _to: timestamp to finish
      */
-    function _getMultiplier(uint256 _from, uint256 _to)
-        internal
-        view
-        returns (uint256)
-    {
-        if (_to <= timestampEnd) {
+    function _getMultiplier(
+        uint256 _id,
+        uint256 _from,
+        uint256 _to
+    ) internal view returns (uint256) {
+        Pool storage pool = pools[_id];
+        if (_to <= pool.timestampEnd) {
             return _to - _from;
-        } else if (_from >= timestampEnd) {
+        } else if (_from >= pool.timestampEnd) {
             return 0;
         } else {
-            return timestampEnd - _from;
+            return pool.timestampEnd - _from;
         }
-    }
-
-    function getIsAccountAutoClaim(address _account)
-        external
-        view
-        returns (bool)
-    {
-        return autoclaimAccounts.getIndexOfKey(_account) != -1;
-    }
-
-    function setAutoclaim(bool _to) external {
-        _to
-            ? autoclaimAccounts.add(msg.sender)
-            : autoclaimAccounts.remove(msg.sender);
     }
 }
