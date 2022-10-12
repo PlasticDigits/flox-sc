@@ -98,14 +98,14 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         _deposit(_account, _amount);
     }
 
-    function airdrop(uint256 _wad) external {
+    function airdrop(uint256 _wad) public {
         Pool storage pool = pools[currentPoolId];
         IERC20 rewardToken = pool.rewardToken;
         _updatePool(currentPoolId);
         rewardToken.transferFrom(msg.sender, address(this), _wad);
         pool.accTokenPerShare =
             pool.accTokenPerShare +
-            ((_wad * PRECISION_FACTOR) / totalStaked);
+            ((_wad * PRECISION_FACTOR) / pool.totalStakedFinal);
     }
 
     function addRewardTokens(uint256 _wad) external {
@@ -129,6 +129,24 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
 
     function updateRewardToken(IERC20 _newToken) external {
         require(msg.sender == address(stakedToken), "ARP: Must be stakedtoken");
+        //Cancel current pool's rps and airdrop all tokens to current stakers.
+        Pool storage oldPool = pools[currentPoolId];
+        _updatePool(currentPoolId);
+        uint256 wadToAirdrop = oldPool.rewardPerSecond *
+            _getMultiplier(
+                currentPoolId,
+                oldPool.timestampLast,
+                oldPool.timestampEnd
+            );
+        oldPool.rewardPerSecond = 0;
+        oldPool.timestampEnd = block.timestamp;
+        oldPool.timestampLast = block.timestamp;
+        oldPool.totalStakedFinal = totalStaked;
+        oldPool.accTokenPerShare =
+            oldPool.accTokenPerShare +
+            ((wadToAirdrop * PRECISION_FACTOR) / oldPool.totalStakedFinal);
+
+        //create new pool
         currentPoolId++;
         Pool storage pool = pools[currentPoolId];
         pool.timestampLast = block.timestamp;
@@ -147,6 +165,8 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
 
     function _claimAll(address _account) internal {
         if (stakedBal[_account] == 0) return; //nothing to claim
+
+        //TODO: Fix issue where rewards are not claimable for expired pools that have had a claim already after expiration
 
         for (
             uint256 i = accountFinalClaimedTo[_account] + 1;
