@@ -49,6 +49,8 @@ contract FLOX is
 
     address[] public path;
 
+    receive() external payable {}
+
     constructor(
         CZUsd _czusd,
         IAmmRouter02 _ammRouter,
@@ -148,6 +150,22 @@ contract FLOX is
         totalCzusdSpent += wadToSend;
         czusd.mint(address(this), wadToSend);
         czusd.approve(address(ammRouter), wadToSend);
+
+        address[] memory czusdToBnbPath;
+        czusdToBnbPath[0] = address(czusd);
+        czusdToBnbPath[1] = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56); //BUSD
+        czusdToBnbPath[2] = ammRouter.WETH(); //BNB
+
+        ammRouter.swapExactTokensForETHSupportingFeeOnTransferTokens(
+            (czusd.balanceOf(address(this)) * projectBasis) / burnBPS,
+            0,
+            czusdToBnbPath,
+            projectDistributor,
+            block.timestamp
+        );
+
+        uint256 tokensForRewards = rewardToken.balanceOf(address(this));
+        //Send to rewards contract
         ammRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
             czusd.balanceOf(address(this)),
             0,
@@ -155,11 +173,6 @@ contract FLOX is
             address(this),
             block.timestamp
         );
-        rewardToken.transfer(
-            projectDistributor,
-            (rewardToken.balanceOf(address(this)) * projectBasis) / burnBPS
-        );
-        uint256 tokensForRewards = rewardToken.balanceOf(address(this));
         rewardToken.approve(address(rewardsDistributor), tokensForRewards);
         rewardsDistributor.addRewardTokens(tokensForRewards);
     }
