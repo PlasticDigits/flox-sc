@@ -22,6 +22,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         IERC20 rewardToken;
         mapping(address => uint256) userRewardDebt;
         mapping(address => uint256) totalRewardsReceived;
+        mapping(address => uint256) finalStakedBal;
     }
 
     mapping(uint256 => Pool) pools;
@@ -87,10 +88,15 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     function getPoolAccount(uint256 _index, address _account)
         external
         view
-        returns (uint256 userRewardDebt_, uint256 totalRewardsReceived_)
+        returns (
+            uint256 userRewardDebt_,
+            uint256 totalRewardsReceived_,
+            uint256 finalStakedBal_
+        )
     {
         userRewardDebt_ = pools[_index].userRewardDebt[_account];
         totalRewardsReceived_ = pools[_index].totalRewardsReceived[_account];
+        finalStakedBal_ = pools[_index].finalStakedBal[_account];
     }
 
     function deposit(address _account, uint256 _amount) external {
@@ -164,10 +170,6 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     }
 
     function _claimAll(address _account) internal {
-        if (stakedBal[_account] == 0) return; //nothing to claim
-
-        //TODO: Fix issue where rewards are not claimable for expired pools that have had a claim already after expiration
-
         for (
             uint256 i = accountFinalClaimedTo[_account] + 1;
             i <= currentPoolId;
@@ -182,10 +184,13 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
             accountFinalClaimedTo[_account] < _id,
             "ARP: Already claimed closed pool"
         );
-        if (_id != currentPoolId) accountFinalClaimedTo[_account] = _id;
         Pool storage pool = pools[currentPoolId];
         IERC20 rewardToken = pool.rewardToken;
         uint256 accountBal = stakedBal[_account];
+        if (accountBal == 0) return; //nothing to claim
+        if (_id != currentPoolId) {
+            accountFinalClaimedTo[_account] = _id;
+        }
         _updatePool(_id);
         if (accountBal > 0) {
             uint256 pending = ((accountBal) * pool.accTokenPerShare) /
@@ -224,6 +229,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         pool.globalRewardDebt += pool.userRewardDebt[_account];
         totalStaked += _amount;
         pool.totalStakedFinal = totalStaked;
+        pool.finalStakedBal[_account] = stakedBal[_account];
     }
 
     /*
@@ -246,6 +252,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         pool.globalRewardDebt += pool.userRewardDebt[_account];
         totalStaked -= _amount;
         pool.totalStakedFinal = totalStaked;
+        pool.finalStakedBal[_account] = stakedBal[_account];
     }
 
     function setIsRewardExempt(address _for, bool _to) public onlyOwner {
@@ -282,7 +289,6 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         returns (uint256)
     {
         Pool storage pool = pools[currentPoolId];
-
         if (
             block.timestamp > pool.timestampLast && pool.totalStakedFinal != 0
         ) {
@@ -290,15 +296,13 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
                 ((pool.rewardPerSecond *
                     _getMultiplier(_id, pool.timestampLast, block.timestamp) *
                     PRECISION_FACTOR) / pool.totalStakedFinal);
-            //TODO: Fix stakedbal for calculating pending rewards
             return
-                (stakedBal[_user] * adjustedTokenPerShare) /
+                (pool.finalStakedBal[_user] * adjustedTokenPerShare) /
                 PRECISION_FACTOR -
                 pool.userRewardDebt[_user];
         } else {
             return
-                //TODO: Fix stakedbal for calculating pending rewards
-                (stakedBal[_user] * pool.accTokenPerShare) /
+                (pool.finalStakedBal[_user] * pool.accTokenPerShare) /
                 PRECISION_FACTOR -
                 pool.userRewardDebt[_user];
         }
@@ -308,7 +312,6 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
      * @notice Update reward variables of the given pool to be up-to-date.
      */
     function _updatePool(uint256 _id) internal {
-        //TODO: Switch to deposit method for adding rewards to pool id
         Pool storage pool = pools[_id];
 
         if (block.timestamp <= pool.timestampLast) {

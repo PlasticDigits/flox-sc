@@ -47,6 +47,9 @@ contract FLOX is
     address public projectDistributor;
     uint256 public projectBasis = 250;
 
+    //TODO: Add MANAGER ability to switch reward token
+    //TODO: Figure out way to handle situation where the reward token is not paired with BNB
+
     constructor(
         CZUsd _czusd,
         IAmmRouter02 _ammRouter,
