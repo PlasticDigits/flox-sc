@@ -47,13 +47,13 @@ contract FLOX is
     address public projectDistributor;
     uint256 public projectBasis = 250;
 
-    //TODO: Add MANAGER ability to switch reward token
-    //TODO: Figure out way to handle situation where the reward token is not paired with BNB
+    address[] public path;
 
     constructor(
         CZUsd _czusd,
         IAmmRouter02 _ammRouter,
         IAmmFactory _factory,
+        IERC20 _initialRewardToken,
         address _rewardsDistributor,
         uint256 _baseCzusdLocked,
         uint256 _totalSupply,
@@ -73,6 +73,13 @@ contract FLOX is
         ADMIN_setCzusd(_czusd);
         ADMIN_setAmmRouter(_ammRouter);
         ADMIN_setBaseCzusdLocked(_baseCzusdLocked);
+
+        path[0] = address(czusd);
+        path[1] = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56); //BUSD
+        path[2] = ammRouter.WETH(); //BNB
+        path[3] = address(_initialRewardToken);
+        rewardToken = _initialRewardToken;
+
         MANAGER_setProjectDistributor(_projectDistributor);
         MANAGER_setRewardsDistributor(_rewardsDistributor);
 
@@ -137,15 +144,11 @@ contract FLOX is
     }
 
     function performUpkeep(bytes calldata) external override {
+        //TODO: Call deposit reward token on ARP
         uint256 wadToSend = availableWadToSend();
         totalCzusdSpent += wadToSend;
         czusd.mint(address(this), wadToSend);
         czusd.approve(address(ammRouter), wadToSend);
-        address[] memory path = new address[](4);
-        path[0] = address(czusd);
-        path[1] = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56); //BUSD
-        path[2] = ammRouter.WETH(); //BNB
-        path[3] = address(rewardToken);
         ammRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
             czusd.balanceOf(address(this)),
             0,
@@ -216,6 +219,26 @@ contract FLOX is
         onlyRole(MANAGER)
     {
         projectDistributor = _to;
+    }
+
+    //If the token is XXX and is paired against BNB, then _rewardToken should be the token and _basePairToken should be the WBNB address `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c`
+    //NOTE: THe base pair token must have decent liquidity against BUSD on pancakeswap (Ex: BNB/BUSD is fine). Otherwise the admin will need to update the path.
+    function MANAGER_setRewardToken(
+        address _rewardToken,
+        address _basePairToken
+    ) public onlyRole(MANAGER) {
+        rewardToken = IERC20(_rewardToken);
+        rewardsDistributor.updateRewardToken(IERC20(_rewardToken));
+        path[path.length - 2] = address(_basePairToken);
+        path[path.length - 1] = address(_rewardToken);
+    }
+
+    function ADMIN_setPath(address[] calldata _path)
+        external
+        onlyRole(DEFAULT_ADMIN_ROLE)
+    {
+        delete path;
+        path = _path;
     }
 
     function ADMIN_openTrading() external onlyRole(DEFAULT_ADMIN_ROLE) {
