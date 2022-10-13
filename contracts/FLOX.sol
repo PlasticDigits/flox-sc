@@ -30,7 +30,7 @@ contract FLOX is
 
     IERC20 public rewardToken;
 
-    uint256 public burnBPS = 1500;
+    uint256 public burnBPS = 1800;
     uint256 public maxBurnBPS = 3000;
     mapping(address => bool) public isExempt;
 
@@ -45,7 +45,7 @@ contract FLOX is
     bool public tradingOpen;
 
     address public projectDistributor;
-    uint256 public projectBasis = 250;
+    uint256 public projectBasis = 600;
 
     address[] public path;
 
@@ -100,18 +100,18 @@ contract FLOX is
 
         uint256 lockedLpCzusdBal = ((czusdIsToken0 ? reserve0 : reserve1) *
             lockedLP) / totalLP;
-        uint256 lockedLpDgodBal = ((czusdIsToken0 ? reserve1 : reserve0) *
+        uint256 lockedLpFloxBal = ((czusdIsToken0 ? reserve1 : reserve0) *
             lockedLP) / totalLP;
 
-        if (lockedLpDgodBal == totalSupply()) {
+        if (lockedLpFloxBal == totalSupply()) {
             lockedCzusd_ = lockedLpCzusdBal;
         } else {
             lockedCzusd_ =
                 lockedLpCzusdBal -
                 (
                     AmmLibrary.getAmountOut(
-                        totalSupply() - lockedLpDgodBal,
-                        lockedLpDgodBal,
+                        totalSupply() - lockedLpFloxBal,
+                        lockedLpFloxBal,
                         lockedLpCzusdBal
                     )
                 );
@@ -144,7 +144,6 @@ contract FLOX is
     }
 
     function performUpkeep(bytes calldata) external override {
-        //TODO: Call deposit reward token on ARP
         uint256 wadToSend = availableWadToSend();
         totalCzusdSpent += wadToSend;
         czusd.mint(address(this), wadToSend);
@@ -160,10 +159,9 @@ contract FLOX is
             projectDistributor,
             (rewardToken.balanceOf(address(this)) * projectBasis) / burnBPS
         );
-        rewardToken.transfer(
-            address(rewardsDistributor),
-            rewardToken.balanceOf(address(this))
-        );
+        uint256 tokensForRewards = rewardToken.balanceOf(address(this));
+        rewardToken.approve(address(rewardsDistributor), tokensForRewards);
+        rewardsDistributor.addRewardTokens(tokensForRewards);
     }
 
     function _burn(address _sender, uint256 _burnAmount) internal override {
@@ -180,12 +178,19 @@ contract FLOX is
         require(recipient != address(0), "ERC20: transfer to the zero address");
 
         //Handle burn
-        if (isExempt[sender] || isExempt[recipient]) {
+        if (
+            //No tax for exempt
+            isExempt[sender] ||
+            isExempt[recipient] ||
+            //No tax if not a trade
+            (sender != address(ammCzusdPair) &&
+                recipient != address(ammCzusdPair))
+        ) {
             super._transfer(sender, recipient, amount);
             rewardsDistributor.deposit(recipient, amount);
             rewardsDistributor.withdraw(sender, amount);
         } else {
-            require(tradingOpen, "DGOD: Not open");
+            require(tradingOpen, "FLOX: Not open");
             uint256 burnAmount = (amount * burnBPS) / 10000;
             if (burnAmount > 0) _burn(sender, burnAmount);
             uint256 postBurnAmount = amount - burnAmount;
@@ -203,7 +208,7 @@ contract FLOX is
     }
 
     function MANAGER_setBps(uint256 _toBps) public onlyRole(MANAGER) {
-        require(_toBps <= maxBurnBPS, "DGOD: Burn too high");
+        require(_toBps <= maxBurnBPS, "FLOX: Burn too high");
         burnBPS = _toBps;
     }
 
