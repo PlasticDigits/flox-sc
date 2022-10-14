@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0
-// Authored by Plastic Digits & Kevin
-// Burns CZUSD, tracks locked liquidity, trades to BNB and sends to Kevin for running green miners
+// Authored by Plastic Digits
 pragma solidity ^0.8.4;
 import "@openzeppelin/contracts/utils/Address.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
@@ -76,10 +75,10 @@ contract FLOX is
         ADMIN_setAmmRouter(_ammRouter);
         ADMIN_setBaseCzusdLocked(_baseCzusdLocked);
 
-        path[0] = address(czusd);
-        path[1] = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56); //BUSD
-        path[2] = ammRouter.WETH(); //BNB
-        path[3] = address(_initialRewardToken);
+        path.push(address(czusd));
+        path.push(address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56)); //BUSD
+        path.push(ammRouter.WETH()); //BNB
+        path.push(address(_initialRewardToken));
         rewardToken = _initialRewardToken;
 
         MANAGER_setProjectDistributor(_projectDistributor);
