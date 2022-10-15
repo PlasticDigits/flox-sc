@@ -12,9 +12,10 @@ const { toNum, toBN } = require("./utils/bignumberConverter");
 const parse = require('csv-parse');
 
 const BASE_CZUSD_LP_WAD = parseEther("42500");
-const INITIAL_CZUSD_LP_WAD = parseEther("68518");
+const INITIAL_CZUSD_LP_WAD = parseEther("42500");
 const INITIAL_SUPPLY = parseEther("1000000000");
 const CZUSD_TOKEN = "0xE68b79e51bf826534Ff37AA9CeE71a3842ee9c70";
+const WBNB_TOKEN = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const BUSD_TOKEN = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
 const DOGECOIN_TOKEN = "0xbA2aE424d960c26247Dd6c32edC70B295c744C43"; //used for testing rewards
 const PCS_FACTORY = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
@@ -47,7 +48,6 @@ describe("FLOX", function () {
       CZUSD_TOKEN,
       PCS_ROUTER,
       PCS_FACTORY,
-      dogeCoin.address, //_initialRewardToken
       autoRewardPool.address,
       BASE_CZUSD_LP_WAD,
       INITIAL_SUPPLY,
@@ -59,7 +59,13 @@ describe("FLOX", function () {
     floxCzusdPair = await ethers.getContractAt("IAmmPair", floxCzusdPair_address);
 
     console.log("initialize autoRewardPool")
-    autoRewardPool.initialize(flox.address,floxCzusdPair.address);
+    await autoRewardPool.initialize(flox.address,floxCzusdPair.address);
+
+    console.log("Set reward token")
+    await flox.connect(manager).MANAGER_setRewardToken(
+      dogeCoin.address,//address _rewardToken,
+      WBNB_TOKEN//address _basePairToken
+    );
     
     await czusd
     .connect(deployer)
@@ -95,7 +101,7 @@ describe("FLOX", function () {
     expect(ownerIsExempt).to.be.true;
     expect(pairIsExempt).to.be.false;
     expect(tradingOpen).to.be.false;
-  });/*
+  });
   it("Should revert buy when trading not open", async function () {
     await czusd.connect(deployer).mint(trader.address,parseEther("10000"));
     await czusd.connect(trader).approve(pcsRouter.address,ethers.constants.MaxUint256);
@@ -108,10 +114,11 @@ describe("FLOX", function () {
         ethers.constants.MaxUint256
     )).to.be.reverted;
   });
-  it("Should burn 15% when buying and increase wad available", async function () {    
+  it("Should burn 18% when buying and increase wad available", async function () {    
     await flox.ADMIN_openTrading();
     const totalStakedInitial = await autoRewardPool.totalStaked();
     const traderBalInitial = await flox.balanceOf(trader.address);
+    console.log("Attempting swap...")
     await pcsRouter.connect(trader).swapExactTokensForTokensSupportingFeeOnTransferTokens(
         parseEther("100"),
         0,
@@ -119,24 +126,34 @@ describe("FLOX", function () {
         trader.address,
         ethers.constants.MaxUint256
     );
-    const pendingReward = await autoRewardPool.pendingReward(trader.address);
-    const rewardPerSecond = await autoRewardPool.rewardPerSecond();
-    const totalStakedFinal = await autoRewardPool.totalStaked();
+    console.log("Swap success.")
+    const pendingReward = await autoRewardPool.pendingReward(1, trader.address);
+    const {accTokenPerShare_,
+      rewardPerSecond_,
+      globalRewardDebt_,
+      timestampLast_,
+      timestampEnd_,
+      totalStakedFinal_,
+      totalRewardsPaid_,
+      totalRewardsAdded_,
+      rewardToken_} = await autoRewardPool.getPool(1);    
     const totalCzusdSpent = await flox.totalCzusdSpent();
     const lockedCzusd = await flox.lockedCzusd();
     const availableWadToSend = await flox.availableWadToSend();
     const totalSupply = await flox.totalSupply();
     const traderBalFinal = await flox.balanceOf(trader.address);
+    console.log(formatEther(lockedCzusd));
+    console.log(formatEther(totalSupply));
     expect(pendingReward).to.eq(0);
-    expect(totalStakedFinal.sub(totalStakedInitial)).to.eq(traderBalFinal.sub(traderBalInitial));
+    expect(totalStakedFinal_.sub(totalStakedInitial)).to.eq(traderBalFinal.sub(traderBalInitial));
     expect(totalStakedInitial).to.eq(0);
-    expect(rewardPerSecond).to.eq(0);
+    expect(rewardPerSecond_).to.eq(0);
     expect(totalCzusdSpent).to.eq(0);
-    expect(lockedCzusd).to.be.closeTo(parseEther("50053.4"),parseEther("0.1"));
+    expect(lockedCzusd).to.be.closeTo(parseEther("42518.3"),parseEther("0.1"));
     expect(availableWadToSend).to.eq(lockedCzusd.sub(BASE_CZUSD_LP_WAD).sub(totalCzusdSpent));
-    expect(totalSupply).to.be.closeTo(parseEther("9998408192"),parseEther("1"));
+    expect(totalSupply).to.be.closeTo(parseEther("999578518"),parseEther("1"));
   });
-  it("Should send reward to dev wallet", async function() {
+  /*it("Should send reward to dev wallet", async function() {
     const devWalletBalInitial = await dogeCoin.balanceOf(manager.address);
     const autoRewardPoolBalInitial = await dogeCoin.balanceOf(autoRewardPool.address);
     const availableWadToSendInitial = await flox.availableWadToSend();

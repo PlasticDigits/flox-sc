@@ -5,6 +5,7 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "hardhat/console.sol";
 
 contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -132,24 +133,29 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         }
     }
 
-    function updateRewardToken(IERC20 _newToken) external {
+    function updateRewardToken(IERC20 _newToken) public {
         require(msg.sender == address(stakedToken), "ARP: Must be stakedtoken");
         //Cancel current pool's rps and airdrop all tokens to current stakers.
         Pool storage oldPool = pools[currentPoolId];
         _updatePool(currentPoolId);
-        uint256 wadToAirdrop = oldPool.rewardPerSecond *
-            _getMultiplier(
-                currentPoolId,
-                oldPool.timestampLast,
-                oldPool.timestampEnd
-            );
+        uint256 wadToAirdrop = oldPool.totalStakedFinal != 0
+            ? oldPool.rewardPerSecond *
+                _getMultiplier(
+                    currentPoolId,
+                    oldPool.timestampLast,
+                    oldPool.timestampEnd
+                )
+            : 0;
         oldPool.rewardPerSecond = 0;
         oldPool.timestampEnd = block.timestamp;
         oldPool.timestampLast = block.timestamp;
         oldPool.totalStakedFinal = totalStaked;
-        oldPool.accTokenPerShare =
-            oldPool.accTokenPerShare +
-            ((wadToAirdrop * PRECISION_FACTOR) / oldPool.totalStakedFinal);
+
+        if (oldPool.totalStakedFinal != 0) {
+            oldPool.accTokenPerShare =
+                oldPool.accTokenPerShare +
+                ((wadToAirdrop * PRECISION_FACTOR) / oldPool.totalStakedFinal);
+        }
 
         //create new pool
         currentPoolId++;
@@ -212,11 +218,12 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         if (isRewardExempt[_account]) return;
         if (_amount == 0) return;
 
-        _claimAll(_account);
-
         //If the account has nothing staked, then do not need to claim old pools
-        if (stakedBal[_account] == 0)
+        if (stakedBal[_account] == 0) {
             accountFinalClaimedTo[_account] == currentPoolId - 1;
+        } else {
+            _claimAll(_account);
+        }
 
         Pool storage pool = pools[currentPoolId];
 
@@ -326,11 +333,13 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
             pool.totalStakedFinal = totalStaked;
         }
 
-        pool.accTokenPerShare =
-            pool.accTokenPerShare +
-            ((pool.rewardPerSecond *
-                _getMultiplier(_id, pool.timestampLast, block.timestamp) *
-                PRECISION_FACTOR) / pool.totalStakedFinal);
+        if (pool.totalStakedFinal != 0) {
+            pool.accTokenPerShare =
+                pool.accTokenPerShare +
+                ((pool.rewardPerSecond *
+                    _getMultiplier(_id, pool.timestampLast, block.timestamp) *
+                    PRECISION_FACTOR) / pool.totalStakedFinal);
+        }
 
         pool.timestampLast = block.timestamp;
     }
@@ -348,7 +357,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         Pool storage pool = pools[_id];
         if (_to <= pool.timestampEnd) {
             return _to - _from;
-        } else if (_from >= pool.timestampEnd) {
+        } else if (_from >= pool.timestampEnd || pool.timestampEnd == 0) {
             return 0;
         } else {
             return pool.timestampEnd - _from;

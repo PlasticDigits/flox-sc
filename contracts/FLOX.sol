@@ -13,6 +13,7 @@ import "./libs/AmmLibrary.sol";
 import "./interfaces/IAmmFactory.sol";
 import "./interfaces/IAmmPair.sol";
 import "./interfaces/IAmmRouter02.sol";
+import "hardhat/console.sol";
 
 contract FLOX is
     ERC20PresetFixedSupply,
@@ -54,7 +55,6 @@ contract FLOX is
         CZUsd _czusd,
         IAmmRouter02 _ammRouter,
         IAmmFactory _factory,
-        IERC20 _initialRewardToken,
         address _rewardsDistributor,
         uint256 _baseCzusdLocked,
         uint256 _totalSupply,
@@ -69,7 +69,7 @@ contract FLOX is
     {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(MANAGER, msg.sender);
-        _grantRole(MANAGER, _rewardsDistributor);
+        _grantRole(MANAGER, _projectDistributor);
 
         ADMIN_setCzusd(_czusd);
         ADMIN_setAmmRouter(_ammRouter);
@@ -78,8 +78,7 @@ contract FLOX is
         path.push(address(czusd));
         path.push(address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56)); //BUSD
         path.push(ammRouter.WETH()); //BNB
-        path.push(address(_initialRewardToken));
-        rewardToken = _initialRewardToken;
+        path.push(address(0x1)); //placeholder
 
         MANAGER_setProjectDistributor(_projectDistributor);
         MANAGER_setRewardsDistributor(_rewardsDistributor);
