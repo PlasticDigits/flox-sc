@@ -5,7 +5,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import "hardhat/console.sol";
+
+//import "hardhat/console.sol";
 
 contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -221,9 +222,8 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         //If the account has nothing staked, then do not need to claim old pools
         if (stakedBal[_account] == 0) {
             accountFinalClaimedTo[_account] == currentPoolId - 1;
-        } else {
-            _claimAll(_account);
         }
+        _claimAll(_account);
 
         Pool storage pool = pools[currentPoolId];
 

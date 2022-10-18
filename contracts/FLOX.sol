@@ -13,7 +13,8 @@ import "./libs/AmmLibrary.sol";
 import "./interfaces/IAmmFactory.sol";
 import "./interfaces/IAmmPair.sol";
 import "./interfaces/IAmmRouter02.sol";
-import "hardhat/console.sol";
+
+//import "hardhat/console.sol";
 
 contract FLOX is
     ERC20PresetFixedSupply,
@@ -144,23 +145,16 @@ contract FLOX is
     }
 
     function performUpkeep(bytes calldata) external override {
-        console.log("FLOX: Calling performUpkeep");
         uint256 wadToSend = availableWadToSend();
-        console.log("FLOX: wadToSend", wadToSend / 1 ether);
+        require(wadToSend > 0, "FLOX: Not enough wad to distribute");
         totalCzusdSpent += wadToSend;
-        console.log("FLOX: Minting CZUSD");
         czusd.mint(address(this), wadToSend);
         czusd.approve(address(ammRouter), wadToSend);
 
-        console.log("FLOX: Setting czusdToBnbPath");
         address[] memory czusdToBnbPath = new address[](3);
         czusdToBnbPath[0] = address(czusd);
         czusdToBnbPath[1] = address(0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56); //BUSD
         czusdToBnbPath[2] = ammRouter.WETH(); //BNB
-        console.log(
-            "FLOX: send rewards to dev",
-            (czusd.balanceOf(address(this)) * projectBasis) / burnBPS / 1 ether
-        );
 
         ammRouter.swapExactTokensForETHSupportingFeeOnTransferTokens(
             (czusd.balanceOf(address(this)) * projectBasis) / burnBPS,
@@ -171,10 +165,6 @@ contract FLOX is
         );
 
         //Send to rewards contract
-        console.log(
-            "FLOX: send rewards to arp",
-            czusd.balanceOf(address(this)) / 1 ether
-        );
         ammRouter.swapExactTokensForTokensSupportingFeeOnTransferTokens(
             czusd.balanceOf(address(this)),
             0,
@@ -184,7 +174,6 @@ contract FLOX is
         );
         uint256 tokensForRewards = rewardToken.balanceOf(address(this));
         rewardToken.approve(address(rewardsDistributor), tokensForRewards);
-        console.log("FLOX: call addRewardTokens", tokensForRewards / 1 ether);
         rewardsDistributor.addRewardTokens(tokensForRewards);
     }
 

@@ -148,18 +148,16 @@ describe("FLOX", function () {
     const devWalletBalInitial = await ethers.provider.getBalance(manager.address);
     const autoRewardPoolBalInitial = await dai.balanceOf(autoRewardPool.address);
     const availableWadToSendInitial = await flox.availableWadToSend();
-    console.log("flox.performUpkeep(0) attempt...")
     await flox.performUpkeep(0);
-    console.log("flox.performUpkeep(0) success.")
     const devWalletBalFinal = await ethers.provider.getBalance(manager.address);
     const autoRewardPoolBalFinal = await dai.balanceOf(autoRewardPool.address);
     const availableWadToSendFinal = await flox.availableWadToSend();
     const totalCzusdSpent = await flox.totalCzusdSpent();
     const traderBal = await flox.balanceOf(trader.address);
-    console.log("trader transfer attempt...")
+
     await flox.connect(trader).transfer(trader1.address,traderBal);
     const trader1Bal = await flox.balanceOf(trader1.address);
-    console.log("trader1 transfer attempt...")
+
     await flox.connect(trader1).transfer(trader.address,trader1Bal);
     const {accTokenPerShare_,
       rewardPerSecond_,
@@ -180,10 +178,17 @@ describe("FLOX", function () {
     expect(rewardPerSecond_).to.be.closeTo(parseEther("0.00002"),parseEther("0.000001"));
 
   });
-  /*it("Should properly set rps on second update", async function() {
+  it("Should properly set rps on second update", async function() {
     await time.increase(1*86400);
     await mine(1);
     const autoRewardPoolBalInitial = await dai.balanceOf(autoRewardPool.address);
+    await pcsRouter.connect(trader).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        parseEther("100"),
+        0,
+        [czusd.address,flox.address],
+        trader.address,
+        ethers.constants.MaxUint256
+    );
     await flox.performUpkeep(0);
     await time.increase(10);
     await mine(1);
@@ -192,27 +197,39 @@ describe("FLOX", function () {
     await flox.connect(trader).transfer(trader1.address,traderBal);
     const trader1Bal = await flox.balanceOf(trader1.address);
     await flox.connect(trader1).transfer(trader.address,trader1Bal);
-    const rewardPerSecond = await autoRewardPool.rewardPerSecond();
-    const totalRewardsPaid = await autoRewardPool.totalRewardsPaid();
-    const traderRewardsReceived = await autoRewardPool.totalRewardsReceived(trader.address);
+    const {accTokenPerShare_,
+      rewardPerSecond_,
+      globalRewardDebt_,
+      timestampLast_,
+      timestampEnd_,
+      totalStakedFinal_,
+      totalRewardsPaid_,
+      totalRewardsAdded_,
+      rewardToken_} = await autoRewardPool.getPool(1);  
+      const {
+        userRewardDebt_,
+        totalRewardsReceived_,
+        finalStakedBal_} = await autoRewardPool.getPoolAccount(1,trader.address);  
+      const [
+        userRewardDebt1_,
+        totalRewardsReceived1_,
+        finalStakedBal1_] = await autoRewardPool.getPoolAccount(1,trader1.address);  
     const traderRewardBal = await dai.balanceOf(trader.address);
-    const trader1RewardsReceived = await autoRewardPool.totalRewardsReceived(trader1.address);
     const trader1RewardBal = await dai.balanceOf(trader1.address);
     const autoRewardPoolBalPostRewards = await dai.balanceOf(autoRewardPool.address);
-    const timestampEnd = await autoRewardPool.timestampEnd();
     const currentTime = await time.latest();
-    const traderPending = await autoRewardPool.pendingReward(trader.address);
-    const trader1Pending = await autoRewardPool.pendingReward(trader1.address);
-    expect(traderPending).to.eq(0);
+    const traderPending = await autoRewardPool.pendingReward(1,trader.address);
+    const trader1Pending = await autoRewardPool.pendingReward(1,trader1.address);
+    expect(traderPending).to.be.closeTo(0,parseEther("0.01"));
     expect(trader1Pending).to.eq(0);
-    expect(traderRewardBal).closeTo(parseEther("64").div(10**10),parseEther("1").div(10**10));
-    expect(trader1RewardBal).to.eq(164665)
-    expect(traderRewardsReceived).to.eq(traderRewardBal);
-    expect(trader1RewardsReceived).to.eq(trader1RewardBal);
-    expect(totalRewardsPaid).to.eq(traderRewardBal.add(trader1RewardBal))
-    expect(autoRewardPoolBalFinal.sub(autoRewardPoolBalInitial)).closeTo(parseEther("159").div(10**10),parseEther("1").div(10**10));
-    expect(rewardPerSecond).to.eq(90547);
-    expect(rewardPerSecond.mul(timestampEnd.sub(currentTime))).closeTo(autoRewardPoolBalPostRewards,10000000);
+    expect(traderRewardBal).to.be.closeTo(parseEther("1.73"),parseEther("0.01"));
+    expect(trader1RewardBal).to.be.closeTo(parseEther("0.0003"),parseEther("0.0001"));
+    expect(totalRewardsReceived_).to.eq(traderRewardBal);
+    expect(totalRewardsReceived1_).to.eq(trader1RewardBal);
+    expect(totalRewardsPaid_).to.eq(traderRewardBal.add(trader1RewardBal))
+    expect(autoRewardPoolBalFinal.sub(autoRewardPoolBalInitial)).closeTo(parseEther("10.3"),parseEther("0.1"));
+    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.00003"),parseEther("0.00001"));
+    expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTime))).closeTo(autoRewardPoolBalPostRewards,parseEther("5"));
   });
   it("Should properly set pending rewards with third trader and third update", async function() {
     await czusd.connect(deployer).mint(trader2.address,parseEther("10000"));
@@ -235,129 +252,25 @@ describe("FLOX", function () {
     await flox.connect(trader).transfer(trader1.address,traderBal);
     const trader1Bal = await flox.balanceOf(trader1.address);
     await flox.connect(trader1).transfer(trader.address,trader1Bal);
-    const rewardPerSecond = await autoRewardPool.rewardPerSecond();
-    const totalRewardsPaid = await autoRewardPool.totalRewardsPaid();
+    const {accTokenPerShare_,
+      rewardPerSecond_,
+      globalRewardDebt_,
+      timestampLast_,
+      timestampEnd_,
+      totalStakedFinal_,
+      totalRewardsPaid_,
+      totalRewardsAdded_,
+      rewardToken_} = await autoRewardPool.getPool(1);  
     const autoRewardPoolBalPostRewards = await dai.balanceOf(autoRewardPool.address);
     const currentTimeFinal = await time.latest();
-    const timestampEnd = await autoRewardPool.timestampEnd();
-    const traderPending = await autoRewardPool.pendingReward(trader.address);
-    const trader1Pending = await autoRewardPool.pendingReward(trader1.address);
-    const trader2Pending = await autoRewardPool.pendingReward(trader2.address);
+    const traderPending = await autoRewardPool.pendingReward(1,trader.address);
+    const trader1Pending = await autoRewardPool.pendingReward(1,trader1.address);
+    const trader2Pending = await autoRewardPool.pendingReward(1,trader2.address);
 
-    expect(rewardPerSecond).to.eq(114076);
-    expect(traderPending).to.eq(0);
+    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.0000464"),parseEther("0.0000001"));
+    expect(traderPending).to.be.closeTo(parseEther("0.00001"),parseEther("0.00001"));
     expect(trader1Pending).to.eq(0);
-    expect(trader2Pending).closeTo(parseEther("51").div(10**10),parseEther("1").div(10**10));
-    expect(rewardPerSecond.mul(timestampEnd.sub(currentTimeFinal))).closeTo(autoRewardPoolBalPostRewards.sub(trader2Pending),10000000);
+    expect(trader2Pending).to.be.closeTo(parseEther("0.98"),parseEther("0.01"));
+    expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTimeFinal.toString()))).to.be.closeTo(autoRewardPoolBalPostRewards.sub(trader2Pending),parseEther("5"));
   });
-  it("DggLock: should deploy", async function() {
-    
-    const dggLockDGGAddress = await dggLock.DGG();
-    const dggLockautoRewardPoolAddress = await dggLock.autoRewardPool();
-    expect(dggLockDGGAddress).to.eq(flox.address);
-    expect(dggLockautoRewardPoolAddress).to.eq(autoRewardPool.address);
-  });
-  it("DggLock: should accept vestors", async function() {
-    const currentTime = await time.latest();
-    await dggLock.setVestSchedule(currentTime+86400*7,currentTime+86400*8);
-    await flox.approve(dggLock.address,ethers.constants.MaxUint256);
-    await dggLock.addVestings([vestor1.address,vestor2.address],[parseEther("500000000"),parseEther("1000000000")]);
-
-    const vestor1DggInitial = await dggLock.accountDggInitial(vestor1.address);
-    const vestor2DggInitial = await dggLock.accountDggInitial(vestor2.address);
-    const vestor1DggClaimable = await dggLock.accountDggClaimable(vestor1.address);
-    const vestor2DggClaimable = await dggLock.accountDggClaimable(vestor2.address);
-    const vestor1DogeClaimable = await autoRewardPool.pendingReward(vestor1.address);
-    const vestor2DogeClaimable = await autoRewardPool.pendingReward(vestor2.address);
-    const firstUnlockEpoch = await dggLock.firstUnlockEpoch();
-    const secondUnlockEpoch = await dggLock.secondUnlockEpoch();
-    const lockBal = await flox.balanceOf(dggLock.address);
-
-    expect(vestor1DggClaimable).to.eq(parseEther("100000000"));
-    expect(vestor2DggClaimable).to.eq(parseEther("200000000"));
-    expect(vestor1DogeClaimable).to.eq(0);
-    expect(vestor2DogeClaimable).to.eq(0);
-    expect(vestor1DggInitial).to.eq(parseEther("500000000"));
-    expect(vestor2DggInitial).to.eq(parseEther("1000000000"));
-    expect(lockBal).to.eq(parseEther("1500000000"));
-    expect(firstUnlockEpoch).to.eq(currentTime+86400*7);
-    expect(secondUnlockEpoch).to.eq(currentTime+86400*8);
-  });
-  it("DggLock: Should properly set pending rewards for dggLock", async function() {
-    await czusd.connect(deployer).mint(trader2.address,parseEther("10000"));
-    await czusd.connect(trader2).approve(pcsRouter.address,ethers.constants.MaxUint256);
-    await pcsRouter.connect(trader2).swapExactTokensForTokensSupportingFeeOnTransferTokens(
-        parseEther("10"),
-        0,
-        [czusd.address,flox.address],
-        trader2.address,
-        ethers.constants.MaxUint256
-    );
-    await time.increase(5*86400);
-    await mine(1);
-    await flox.performUpkeep(0);
-    const traderBal = await flox.balanceOf(trader.address);
-    await flox.connect(trader).transfer(trader1.address,traderBal);
-    const trader1Bal = await flox.balanceOf(trader1.address);
-    await flox.connect(trader1).transfer(trader.address,trader1Bal);
-    const rewardPerSecond = await autoRewardPool.rewardPerSecond();
-    const autoRewardPoolBalPostRewards = await dai.balanceOf(autoRewardPool.address);
-    const currentTimeFinal = await time.latest();
-    const timestampEnd = await autoRewardPool.timestampEnd();
-    const traderPending = await autoRewardPool.pendingReward(trader.address);
-    const trader1Pending = await autoRewardPool.pendingReward(trader1.address);
-    const trader2Pending = await autoRewardPool.pendingReward(trader2.address);
-    const vestor1LockPending = await autoRewardPool.pendingReward(vestor1.address);
-    const vestor2LockPending = await autoRewardPool.pendingReward(vestor2.address);
-    expect(rewardPerSecond).to.eq(48126);
-    expect(traderPending).to.eq(0);
-    expect(trader1Pending).to.eq(0);
-    expect(trader2Pending).closeTo(parseEther("3.2").div(10**10),parseEther("0.1").div(10**10));
-    expect(vestor1LockPending).closeTo(parseEther("162").div(10**10),parseEther("1").div(10**10));
-    expect(vestor2LockPending).closeTo(parseEther("325").div(10**10),parseEther("1").div(10**10));
-    expect(rewardPerSecond.mul(timestampEnd.sub(currentTimeFinal))).closeTo(autoRewardPoolBalPostRewards.sub(trader2Pending).sub(vestor2LockPending).sub(vestor1LockPending),10000000);
-  });
-  it("DggLock: Should claim rewards for vestor", async function() {
-
-    const rewardPerSecond = await autoRewardPool.rewardPerSecond();
-
-    const vestor1LockPendingInitial = await autoRewardPool.pendingReward(vestor1.address);
-    await autoRewardPool.connect(vestor1).claim();
-    const vestor1LockPendingFinal = await autoRewardPool.pendingReward(vestor1.address);
-
-    const vestor2LockPendingInitial = await autoRewardPool.pendingReward(vestor2.address);
-    await autoRewardPool.connect(vestor2).claim();
-    const vestor2LockPendingFinal = await autoRewardPool.pendingReward(vestor2.address);
-
-    const vestor1DogeBal = await dai.balanceOf(vestor1.address);
-    const vestor2DogeBal = await dai.balanceOf(vestor2.address);
-
-    expect(vestor1LockPendingInitial).closeTo(parseEther("162").div(10**10),parseEther("1").div(10**10));
-    expect(vestor2LockPendingInitial).closeTo(parseEther("325").div(10**10),parseEther("1").div(10**10));
-    expect(vestor1DogeBal).to.eq(vestor1LockPendingInitial);
-    expect(vestor2DogeBal).to.eq(vestor2LockPendingInitial);
-    expect(vestor1LockPendingFinal).to.eq(0);
-    expect(vestor2LockPendingFinal).to.eq(0);
-
-  });
-  it("DggLock: Should send 20% Flox before first epoch", async function() {
-    await dggLock.connect(vestor1).claimDgg();
-    const vestor1Bal = await flox.balanceOf(vestor1.address);
-    expect(vestor1Bal).to.eq(parseEther("100000000"));
-  });
-  it("DggLock: Should send 40% Flox after first epoch before second epoch", async function() {
-    await time.increase(2*86400);
-    await dggLock.connect(vestor1).claimDgg();
-    const vestor1Bal = await flox.balanceOf(vestor1.address);
-    expect(vestor1Bal).to.eq(parseEther("300000000"));
-  });
-  it("DggLock: Should send remaining Flox after second epoch", async function() {
-    await time.increase(2*86400);
-    await dggLock.connect(vestor1).claimDgg();
-    await dggLock.connect(vestor2).claimDgg();
-    const vestor1Bal = await flox.balanceOf(vestor1.address);
-    const vestor2Bal = await flox.balanceOf(vestor2.address);
-    expect(vestor1Bal).to.eq(parseEther("500000000"));
-    expect(vestor2Bal).to.eq(parseEther("1000000000"));
-  });*/
 });
