@@ -18,6 +18,7 @@ const CZUSD_TOKEN = "0xE68b79e51bf826534Ff37AA9CeE71a3842ee9c70";
 const WBNB_TOKEN = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c";
 const BUSD_TOKEN = "0xe9e7CEA3DedcA5984780Bafc599bD69ADd087D56";
 const DAI_TOKEN = "0x1AF3F329e8BE154074D8769D1FFa4eE058B1DBc3"; //used for testing rewards
+const USDT_TOKEN = "0x55d398326f99059fF775485246999027B3197955"; //used for testing rewards
 const PCS_FACTORY = "0xcA143Ce32Fe78f1f7019d7d551a6402fC5350c73";
 const PCS_ROUTER = "0x10ED43C718714eb63d5aA57B78B54704E256024E";
 const DEPLOYER = "0x70e1cB759996a1527eD1801B169621C18a9f38F9";
@@ -26,7 +27,7 @@ const DEPLOYER = "0x70e1cB759996a1527eD1801B169621C18a9f38F9";
 describe("FLOX", function () {
   let owner, manager, trader, trader1, trader2, trader3, feeDistributor;
   let deployer;
-  let flox, czusd, busd, dai, pcsRouter, floxCzusdPair, autoRewardPool;
+  let flox, czusd, busd, dai, usdt, pcsRouter, floxCzusdPair, autoRewardPool;
   before(async function() {
     [owner, manager, trader, trader1, trader2, trader3, feeDistributor] = await ethers.getSigners();
     await impersonateAccount(DEPLOYER);
@@ -35,6 +36,7 @@ describe("FLOX", function () {
     pcsRouter = await ethers.getContractAt("IAmmRouter02", PCS_ROUTER);
     czusd = await ethers.getContractAt("CZUsd", CZUSD_TOKEN);
     dai = await ethers.getContractAt("IERC20", DAI_TOKEN);
+    usdt = await ethers.getContractAt("IERC20", USDT_TOKEN);
     busd = await ethers.getContractAt("IERC20", BUSD_TOKEN);
 
     const AutoRewardPool = await ethers.getContractFactory("AutoRewardPool_Variable");
@@ -228,7 +230,7 @@ describe("FLOX", function () {
     expect(totalRewardsReceived1_).to.eq(trader1RewardBal);
     expect(totalRewardsPaid_).to.eq(traderRewardBal.add(trader1RewardBal))
     expect(autoRewardPoolBalFinal.sub(autoRewardPoolBalInitial)).closeTo(parseEther("10.3"),parseEther("0.1"));
-    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.00003"),parseEther("0.00001"));
+    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.00004"),parseEther("0.000001"));
     expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTime))).closeTo(autoRewardPoolBalPostRewards,parseEther("5"));
   });
   it("Should properly set pending rewards with third trader and third update", async function() {
@@ -267,10 +269,68 @@ describe("FLOX", function () {
     const trader1Pending = await autoRewardPool.pendingReward(1,trader1.address);
     const trader2Pending = await autoRewardPool.pendingReward(1,trader2.address);
 
-    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.0000464"),parseEther("0.0000001"));
+    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.0000541"),parseEther("0.0000001"));
     expect(traderPending).to.be.closeTo(parseEther("0.00001"),parseEther("0.00001"));
     expect(trader1Pending).to.eq(0);
-    expect(trader2Pending).to.be.closeTo(parseEther("0.98"),parseEther("0.01"));
-    expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTimeFinal.toString()))).to.be.closeTo(autoRewardPoolBalPostRewards.sub(trader2Pending),parseEther("5"));
+    expect(trader2Pending).to.be.closeTo(parseEther("1.14"),parseEther("0.01"));
+    expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTimeFinal.toString()))).to.be.closeTo(autoRewardPoolBalPostRewards.sub(trader2Pending),parseEther("2"));
+  });
+  it("Should change reward token", async function() {
+    await flox.connect(manager).MANAGER_setRewardToken(
+      usdt.address,//address _rewardToken,
+      WBNB_TOKEN//address _basePairToken
+    );
+    const currentTime = await time.latest();
+    const [accTokenPerShare1,
+      rewardPerSecond1,
+      globalRewardDebt1,
+      timestampLast1,
+      timestampEnd1,
+      totalStakedFinal1,
+      totalRewardsPaid1,
+      totalRewardsAdded1,
+      rewardToken1] = await autoRewardPool.getPool(1);  
+    const [accTokenPerShare2,
+      rewardPerSecond2,
+      globalRewardDebt2,
+      timestampLast2,
+      timestampEnd2,
+      totalStakedFinal2,
+      totalRewardsPaid2,
+      totalRewardsAdded2,
+      rewardToken2] = await autoRewardPool.getPool(2);
+    const arpCurrentPoolId = await autoRewardPool.currentPoolId;
+    const floxRewardToken = await flox.rewardToken();
+
+    const trader2Pending1 = await autoRewardPool.pendingReward(1,trader2.address);
+    const trader2Pending2 = await autoRewardPool.pendingReward(2,trader2.address);
+    const trader1Pending1 = await autoRewardPool.pendingReward(1,trader1.address);
+    const trader1Pending2 = await autoRewardPool.pendingReward(2,trader1.address);
+    const traderPending1 = await autoRewardPool.pendingReward(1,trader.address);
+    const traderPending2 = await autoRewardPool.pendingReward(2,trader.address);
+
+
+    const autoRewardPoolBalDai = await dai.balanceOf(autoRewardPool.address);
+
+    console.log(formatEther(traderPending1),formatEther(trader1Pending1),formatEther(trader2Pending1))
+
+    console.log()
+
+    expect(rewardToken1).to.eq(dai.address);
+    expect(rewardToken2).to.eq(usdt.address);
+    expect(rewardPerSecond2).to.eq(0);
+    expect(timestampEnd1).to.eq(currentTime);
+
+    expect(traderPending2).to.eq(0);
+    expect(trader1Pending2).to.eq(0);
+    expect(trader2Pending2).to.eq(0);
+
+    expect(autoRewardPoolBalDai).to.be.closeTo(traderPending1.add(trader1Pending1).add(trader2Pending1),parseEther("2"));
+
+    //TODO: Should not be zero for accounts with pending before token switch
+    expect(traderPending1).to.be.closeTo(parseEther("21.8"),parseEther("0.1"));
+    expect(trader1Pending1).to.eq(0);
+    expect(trader2Pending1).to.be.closeTo(parseEther("12.0"),parseEther("0.1"));;
+
   });
 });

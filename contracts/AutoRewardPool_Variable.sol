@@ -124,7 +124,8 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
 
         pool.totalRewardsAdded += _wad;
 
-        uint256 totalRewardsToDistribute = pool.totalRewardsAdded -
+        uint256 totalRewardsToDistribute = pool.totalRewardsAdded +
+            pool.globalRewardDebt -
             ((pool.accTokenPerShare * pool.totalStakedFinal) /
                 PRECISION_FACTOR);
 
@@ -294,7 +295,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         view
         returns (uint256)
     {
-        Pool storage pool = pools[currentPoolId];
+        Pool storage pool = pools[_id];
         if (
             block.timestamp > pool.timestampLast && pool.totalStakedFinal != 0
         ) {
