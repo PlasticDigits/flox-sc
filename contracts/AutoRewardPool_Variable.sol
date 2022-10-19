@@ -6,7 +6,7 @@ import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/extensions/IERC20Metadata.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 
-//import "hardhat/console.sol";
+import "hardhat/console.sol";
 
 contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
@@ -195,8 +195,8 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         Pool storage pool = pools[_id];
         IERC20 rewardToken = pool.rewardToken;
         uint256 accountBal = stakedBal[_account];
-        if (accountBal == 0) return; //nothing to claim
         _updatePool(_id);
+        if (accountBal == 0) return;
         if (accountBal > 0) {
             uint256 pending = ((accountBal) * pool.accTokenPerShare) /
                 PRECISION_FACTOR -
