@@ -312,10 +312,6 @@ describe("FLOX", function () {
 
     const autoRewardPoolBalDai = await dai.balanceOf(autoRewardPool.address);
 
-    console.log(formatEther(traderPending1),formatEther(trader1Pending1),formatEther(trader2Pending1))
-
-    console.log()
-
     expect(rewardToken1).to.eq(dai.address);
     expect(rewardToken2).to.eq(usdt.address);
     expect(rewardPerSecond2).to.eq(0);
@@ -332,5 +328,64 @@ describe("FLOX", function () {
     expect(trader1Pending1).to.eq(0);
     expect(trader2Pending1).to.be.closeTo(parseEther("12.0"),parseEther("0.1"));;
 
+  });
+  it("Should properly set rps after token switch", async function() {
+    await time.increase(1*86400);
+    await mine(1);
+    const autoRewardPoolBalInitial = await usdt.balanceOf(autoRewardPool.address);
+    await pcsRouter.connect(trader).swapExactTokensForTokensSupportingFeeOnTransferTokens(
+        parseEther("100"),
+        0,
+        [czusd.address,flox.address],
+        trader.address,
+        ethers.constants.MaxUint256
+    );
+    await flox.performUpkeep(0);
+    await time.increase(1*86400);
+    await mine(1);
+    const autoRewardPoolBalFinal = await usdt.balanceOf(autoRewardPool.address);
+    const traderBal = await flox.balanceOf(trader.address);
+    const trader1BalInitial = await flox.balanceOf(trader1.address);
+    const trader1RewardBalInitial = await usdt.balanceOf(trader1.address);
+    await flox.connect(trader).transfer(trader1.address,traderBal);
+    const trader1Bal = await flox.balanceOf(trader1.address);
+    await flox.connect(trader1).transfer(trader.address,trader1Bal);
+    const {accTokenPerShare_,
+      rewardPerSecond_,
+      globalRewardDebt_,
+      timestampLast_,
+      timestampEnd_,
+      totalStakedFinal_,
+      totalRewardsPaid_,
+      totalRewardsAdded_,
+      rewardToken_} = await autoRewardPool.getPool(2);  
+      const {
+        userRewardDebt_,
+        totalRewardsReceived_,
+        finalStakedBal_} = await autoRewardPool.getPoolAccount(2,trader.address);  
+      const [
+        userRewardDebt1_,
+        totalRewardsReceived1_,
+        finalStakedBal1_] = await autoRewardPool.getPoolAccount(2,trader1.address);  
+    const traderRewardBal = await usdt.balanceOf(trader.address);
+    const trader1RewardBal = await usdt.balanceOf(trader1.address);
+    const autoRewardPoolBalPostRewards = await usdt.balanceOf(autoRewardPool.address);
+    await time.increase(1*86400);
+    const currentTime = await time.latest();
+    const traderPending = await autoRewardPool.pendingReward(2,trader.address);
+    const trader1Pending = await autoRewardPool.pendingReward(2,trader1.address);
+    const trader2Pending = await autoRewardPool.pendingReward(2,trader2.address);
+    
+    expect(traderPending).to.be.closeTo(parseEther("1.2"),parseEther("0.1"));
+    expect(trader1Pending).to.eq(0);
+    expect(trader2Pending).to.eq(0);
+    expect(traderRewardBal).to.be.closeTo(parseEther("0.73"),parseEther("0.01"));
+    expect(trader1RewardBal).to.be.closeTo(parseEther("0.73"),parseEther("0.01"));
+    expect(totalRewardsReceived_).to.eq(traderRewardBal);
+    expect(totalRewardsReceived1_).to.eq(trader1RewardBal);
+    expect(totalRewardsPaid_).to.eq(traderRewardBal.add(trader1RewardBal))
+    expect(autoRewardPoolBalFinal.sub(autoRewardPoolBalInitial)).closeTo(parseEther("11.9"),parseEther("0.1"));
+    expect(rewardPerSecond_).to.be.closeTo(parseEther("0.000019"),parseEther("0.000001"));
+    expect(rewardPerSecond_.mul(timestampEnd_.sub(currentTime)).add(traderPending)).closeTo(autoRewardPoolBalPostRewards,parseEther("1"));
   });
 });

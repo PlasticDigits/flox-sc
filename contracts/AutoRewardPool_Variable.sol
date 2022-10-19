@@ -109,7 +109,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         Pool storage pool = pools[currentPoolId];
         IERC20 rewardToken = pool.rewardToken;
         _updatePool(currentPoolId);
-        rewardToken.transferFrom(msg.sender, address(this), _wad);
+        rewardToken.safeTransferFrom(msg.sender, address(this), _wad);
         pool.accTokenPerShare =
             pool.accTokenPerShare +
             ((_wad * PRECISION_FACTOR) / pool.totalStakedFinal);
@@ -120,7 +120,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
 
         Pool storage pool = pools[currentPoolId];
         IERC20 rewardToken = pool.rewardToken;
-        rewardToken.transferFrom(msg.sender, address(this), _wad);
+        rewardToken.safeTransferFrom(msg.sender, address(this), _wad);
 
         pool.totalRewardsAdded += _wad;
 
@@ -184,6 +184,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
         ) {
             _claimFor(i, _account);
         }
+        accountFinalClaimedTo[_account] = currentPoolId - 1;
     }
 
     function _claimFor(uint256 _id, address _account) internal {
@@ -191,13 +192,10 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
             accountFinalClaimedTo[_account] < _id,
             "ARP: Already claimed closed pool"
         );
-        Pool storage pool = pools[currentPoolId];
+        Pool storage pool = pools[_id];
         IERC20 rewardToken = pool.rewardToken;
         uint256 accountBal = stakedBal[_account];
         if (accountBal == 0) return; //nothing to claim
-        if (_id != currentPoolId) {
-            accountFinalClaimedTo[_account] = _id;
-        }
         _updatePool(_id);
         if (accountBal > 0) {
             uint256 pending = ((accountBal) * pool.accTokenPerShare) /
@@ -222,7 +220,7 @@ contract AutoRewardPool_Variable is Ownable, ReentrancyGuard {
 
         //If the account has nothing staked, then do not need to claim old pools
         if (stakedBal[_account] == 0) {
-            accountFinalClaimedTo[_account] == currentPoolId - 1;
+            accountFinalClaimedTo[_account] = currentPoolId - 1;
         }
         _claimAll(_account);
 
